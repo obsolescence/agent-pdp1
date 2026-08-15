@@ -15,7 +15,7 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 PKG_DIR="$SELF_DIR"
 HERMES_BIN=""
 
-say()  { echo "== $*"; }
+say()  { echo; echo "== $*"; }
 fail() { echo "ERROR: $*" >&2; exit 1; }
 
 # ------------------------------------------------------------ step 1: the key
@@ -69,18 +69,12 @@ fi
 # --------------------------------------------------- step 3: the PDP-1 skills
 
 say "step 3: the PDP-1 skills"
-if [ ! -d "$HOME/.hermes/profiles" ]; then
-    echo "  No Hermes profile yet. Run 'hermes setup' once (it asks for your"
-    echo "  API key and creates your profile), then re-run this script:"
-    echo "    ./setup-hermes.sh"
-    exit 1
-fi
-
-mapfile -t PROFILES < <(find "$HOME/.hermes/profiles" -mindepth 1 -maxdepth 1 -type d | sort)
+mapfile -t PROFILES < <(find "$HOME/.hermes/profiles" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
 case "${#PROFILES[@]}" in
     0)
         echo "  No Hermes profile yet. Run 'hermes setup' once (it asks for"
-        echo "  your API key and creates your profile), then re-run this script."
+        echo "  your API key and creates your profile), then re-run this script:"
+        echo "    ./setup-hermes.sh"
         exit 1
         ;;
     1)
@@ -107,6 +101,9 @@ mkdir -p "$SKILLS_DIR"
 
 echo "  symlinking the frozen skills — a symlink is a pointer, so updates"
 echo "  to agent-pdp1 reach your agent automatically"
+# drop stale links for renamed/removed skills (pdp1-learnings is a real
+# directory — only symlinks are touched)
+find "$SKILLS_DIR" -maxdepth 1 -type l -name 'pdp1-*' -delete 2>/dev/null || true
 for d in "$PKG_DIR"/skills/*/; do
     ln -sfn "$d" "$SKILLS_DIR/$(basename "$d")"
 done
@@ -158,10 +155,12 @@ fi
 say "verify"
 echo "  installed for profile '$PROFILE':"
 ls "$SKILLS_DIR" | grep 'pdp1' | sed 's/^/    /'
-COUNT="$(ls "$SKILLS_DIR" | grep -c 'pdp1' 2>/dev/null || true)"
-if [ "${COUNT:-0}" -eq 0 ]; then
-    fail "no pdp1 skills found in $SKILLS_DIR"
-fi
+for s in pdp1-assembly pdp1-code-review pdp1-debugging \
+         pdp1-plumbing pdp1-tutor pdp1-type30-vision; do
+    [ -d "$PKG_DIR/skills/$s" ] || fail "package is missing skills/$s — re-run skills/update.sh"
+    [ -d "$SKILLS_DIR/$s" ]     || fail "'$s' missing or broken in $SKILLS_DIR — re-run this script"
+done
+[ -d "$SKILLS_DIR/pdp1-learnings" ] || fail "pdp1-learnings missing in $SKILLS_DIR — re-run this script"
 
 say "next steps"
 echo "  - not done yet?  hermes setup     (paste your DeepSeek API key,"

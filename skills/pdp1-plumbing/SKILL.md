@@ -1,6 +1,6 @@
 ---
 name: pdp1-plumbing
-description: Use when operating the PiDP-1 — the basics of the whole setup: ports and connections, the shared typewriter, the display rule, the copilot model, building/starting/loading, and updating the emulator. The wiring diagram; the protocol itself lives in pdp1-debugging.
+description: operating the PiDP-1 — unserstanding the setup: connections, typewriter, the display rule, the copilot model, starting/loading. Details on the control protocol itself lives in pdp1-debugging.
 ---
 
 # PiDP-1 Plumbing — how the setup works
@@ -15,14 +15,14 @@ Important: The other two must be used through the specified helper programs
 | Port | Surface | Who uses it |
 | ---- | ------- | ----------- |
 | 1040 | debug interface (line protocol) | agent drives the machine here, including control over front panel |
-| 1041 | typewriter telnet (fan-out) | the agent AND the user share the same typewriter |
-| 3400 | Type 30 display stream (fan-out) | the agent and pdp1_periph watch concurrently |
+| 1041 | typewriter telnet (fan-out) | agent AND the user share the same typewriter |
+| 3400 | Type 30 display stream (fan-out) | agent and pdp1_periph can watch concurrently |
 
 Connection limits: 1040 up to 8, typewriter 4, display 4, reader/punch 1.
 
 ## 1041 — shared typewriter
 
-Acts as the user terminal. Telnet, FIO-DEC/ASCII translation built in. Output fans out to every
+Acts as user terminal. Telnet, FIO-DEC/ASCII translation built in. Output fans out to every
 client; input from any client reaches the machine. Don't type into a
 program that is waiting for the user; don't assume a prompt came from
 you.
@@ -40,10 +40,10 @@ This is where the agent controls the machine: memory, registers, run
 control, breakpoints, watchpoints, stepping, tape devices, the light
 pen, and the front panel (you can override the actual front panel
 under your control). **The full protocol — every command, every
-semantics — is the pdp1-debugging skill; load it before driving.**
+semantics — is in the pdp1-debugging skill; load it before driving.**
 
-**You are not supposed to connect to this port raw.** The client is
-the `pdp1dbg.py` helper from pdp1-debugging — one command per
+**You are not supposed to connect to this port raw.**. Use the 
+`pdp1dbg.py` helper from pdp1-debugging — one command per
 invocation, or stdin batch mode for sequences that must share one
 connection. A raw socket means reimplementing the framing (read until
 `+` or `-`, skip `!` events) and getting pending commands wrong;

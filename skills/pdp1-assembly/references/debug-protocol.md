@@ -15,7 +15,8 @@ field** (see "MA" below).
 ## Before you connect
 
 ```sh
-ps aux | grep '[p]dp1'                  # is one already running?
+pdp1control stat                      # is the emulator running?
+ps aux | grep '[p]dp1'                # (or look for the process)
 ```
 
 **Never start a second emulator.** The first one holds ports 1040-1043; the
@@ -54,9 +55,10 @@ One outstanding command per connection; no tags, no pipelining. Lines over
 1024 bytes are answered `- ?arg line too long` and the rest is discarded
 through the next newline.
 
-`ncat` is fine for one-shots. For anything with a pending command
-(`step`, `run`, `until`, `wait`) use `scripts/pdp1dbg.py`, which handles the
-framing and — much more usefully — knows your labels.
+**Agents use the helper, `pdp1dbg.py`, for everything** — it implements this
+framing and knows your labels. `ncat` is only for humans poking and for
+instant-reply verbs; a one-shot connection dies before a pending command's
+reply arrives, taking any temporary breakpoint with it.
 
 **Numbers: addresses and machine words are octal with no prefix; counts,
 timeouts and light-pen radii are decimal.** `e 100 20` examines twenty words
@@ -67,7 +69,7 @@ starting at octal 100. Getting this backwards is the most common first mistake.
 ```sh
 macro1_1 -r prog.mac                       # -> prog.rim + prog.lst
 
-python3 scripts/pdp1dbg.py --lst prog.lst \
+python3 /opt/agent-pdp1/skills/pdp1-debugging/scripts/pdp1dbg.py --lst prog.lst \
     'l /path/prog.rim'  \
     'w pc go'           \
     'b chkwin'          \
@@ -484,7 +486,7 @@ call site, `ret=` where it should come back to.
 **Did the last crash leave core damaged?**
 
 ```
-python3 scripts/pdp1dbg.py --lst prog.lst check
+python3 /opt/agent-pdp1/skills/pdp1-debugging/scripts/pdp1dbg.py --lst prog.lst check
 ```
 Anything beyond the `dap` return cells and your variables means reload the
 tape before you investigate anything — see `references/debugging.md`.

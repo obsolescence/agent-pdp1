@@ -239,7 +239,7 @@ damage.
 You no longer have to guess whether it happened:
 
 ```sh
-python3 scripts/pdp1dbg.py --lst prog.lst check
+python3 /opt/agent-pdp1/skills/pdp1-debugging/scripts/pdp1dbg.py --lst prog.lst check
 ```
 
 compares every assembled word against core and prints the differences. The

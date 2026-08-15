@@ -13,8 +13,8 @@ subroutine return.
 
 ## Read this first: the five things that actually bite
 
-1. **The PDP-1 is not a PDP-8.** They look alike and share an assembler lineage,
-   so PDP-8 facts leak into PDP-1 material constantly. The PDP-1 has **no link
+1. **The PDP-1 is not a PDP-8.** 
+   PDP-8 facts leak into PDP-1 material sometimes. The PDP-1 has **no link
    bit, no page-zero/current-page addressing, no `tad`, no `isz`, no `jms`**.
    Its address field is a full 12 bits — every location is directly reachable.
    If a claim mentions pages, the link, or `jms`, it is PDP-8 contamination.
@@ -134,7 +134,7 @@ pdp1-debugging skill):
 
 ```sh
 macro1_1 -r prog.mac
-python3 ../pdp1-debugging/scripts/pdp1dbg.py --lst prog.lst \
+python3 /opt/agent-pdp1/skills/pdp1-debugging/scripts/pdp1dbg.py --lst prog.lst \
     'l prog.rim' 'w pc go' 'b chkwin' 'run 100000' 'where' 'back'
 ```
 
