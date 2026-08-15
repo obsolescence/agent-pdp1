@@ -39,7 +39,7 @@ echo ""
 say "step 2: install Hermes"
 if command -v hermes >/dev/null 2>&1; then
     HERMES_BIN="$(command -v hermes)"
-    echo "  Hermes is already installed: $(hermes --version 2>/dev/null | head -1)"
+    echo "  Hermes is already installed: $("$HERMES_BIN" --version 2>/dev/null | head -1)"
 elif [ -x "$HOME/.local/bin/hermes" ]; then
     HERMES_BIN="$HOME/.local/bin/hermes"
     echo "  Hermes is already installed: $("$HERMES_BIN" --version 2>/dev/null | head -1)"
@@ -50,11 +50,12 @@ else
     echo "   Python, Node and the 'hermes' command for you — no sudo needed.)"
     read -r -p "  Run it now? [y/N] " ans
     case "${ans:-n}" in
-        y|Y)
+        [Yy]*)
             curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash \
                 || fail "the Hermes installer failed — see the output above"
             export PATH="$HOME/.local/bin:$PATH"
             HERMES_BIN="$(command -v hermes)"
+            [ -n "$HERMES_BIN" ] || fail "hermes not found after install — is ~/.local/bin on your PATH? check and re-run"
             echo "  (New shells will find 'hermes' too: source ~/.bashrc)"
             ;;
         *)
@@ -113,12 +114,44 @@ done
 echo "  copying pdp1-learnings — YOUR agent's own file, where it keeps"
 echo "  what it learns. A real copy, never a symlink: updates must not"
 echo "  overwrite it"
-rm -rf "$SKILLS_DIR/pdp1-learnings"
-cp -r "$PKG_DIR/hermes-specific/pdp1-learnings" "$SKILLS_DIR/"
+LEARNINGS_DIR="$SKILLS_DIR/pdp1-learnings"
+if [ -e "$LEARNINGS_DIR" ]; then
+    echo "  You already have one here: $LEARNINGS_DIR"
+    read -r -p "  Overwrite it with the fresh template? [y/N] " ans
+    case "${ans:-n}" in
+        [Yy]*)
+            rm -rf "$LEARNINGS_DIR"
+            cp -r "$PKG_DIR/hermes-specific/pdp1-learnings" "$SKILLS_DIR/"
+            ;;
+        *)
+            echo "  Keeping your existing pdp1-learnings."
+            echo "  (If you want the fresh template later: back up that"
+            echo "   directory first, then re-run this script and answer y.)"
+            ;;
+    esac
+else
+    cp -r "$PKG_DIR/hermes-specific/pdp1-learnings" "$SKILLS_DIR/"
+fi
 
 echo "  copying SOUL.md — the rules file. Your agent reads it with every"
 echo "  request; it keeps the agent disciplined about the machine"
-cp "$PKG_DIR/hermes-specific/SOUL.md" "$HOME/.hermes/profiles/$PROFILE/SOUL.md"
+SOUL_FILE="$HOME/.hermes/profiles/$PROFILE/SOUL.md"
+if [ -e "$SOUL_FILE" ]; then
+    echo "  You already have one here: $SOUL_FILE"
+    read -r -p "  Overwrite it with the package version? [y/N] " ans
+    case "${ans:-n}" in
+        [Yy]*)
+            cp "$PKG_DIR/hermes-specific/SOUL.md" "$SOUL_FILE"
+            ;;
+        *)
+            echo "  Keeping your existing SOUL.md."
+            echo "  (If you want the package version later: back that file"
+            echo "   up first, then re-run this script and answer y.)"
+            ;;
+    esac
+else
+    cp "$PKG_DIR/hermes-specific/SOUL.md" "$SOUL_FILE"
+fi
 
 # ------------------------------------------------------------------ verify
 
