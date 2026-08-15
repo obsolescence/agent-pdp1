@@ -1,0 +1,125 @@
+/ PDP-1 Landing Simulator
+/ Real-time runway perspective using hardware MUL/DIV
+/ Controls: SW0=throttle(off=descend), SW1=yoke left, SW2=yoke right
+/
+/ Perspective: for each runway light at distance dz:
+/   x_offset = (halfwidth * projection) / dz
+/   y_offset = (altitude * projection) / dz
+/
+/ MUL->DIV chain: product feeds directly into DIV. Quotient is
+/ a plain 18-bit integer in AC. Overflow when product>>17 >= dz.
+
+mul=mus
+div=dis
+
+/ Z-Values (53 distances, octal feet)
+zvals,
+	0	0	0	0	0
+	62	62	62	62	62
+	144	144	144	144	144
+	226	226	226	226	226
+	310	310	310	310	310
+	454	454	454	454	454
+	620	620	620	620	620
+	764	764	764	764	764
+	1130	1130	1130	1130	1130
+	1440	1440	1440	1440	1440
+	1750	1750	2570	3410	4230
+	5050	5670	6510
+zend,	6510
+
+hwraw,	620	/ half-width = 400 raw units
+prjraw,	1750	/ projection = 1000 raw units
+one,	1
+
+plz,	0
+ply,	500
+sink,	2
+
+ptr,	0
+ret,	0
+tmp,	0
+dz,	0
+oxr,	0
+oyr,	0
+xr,	0
+yr,	0
+
+start,
+main,
+	lat
+	dac tmp
+	lac tmp
+	and mask0
+	sza
+	 jmp nose
+	lac ply
+	sub sink
+	dac ply
+nose,
+	lac tmp
+	and mask1
+	sza
+	 jmp nolf
+	sub one
+	dac plz
+nolf,
+	lac tmp
+	and mask2
+	sza
+	 jmp nort
+	add one
+	dac plz
+nort,
+	law zvals
+	dac ptr
+loop,
+	lac i ptr
+	dac tmp
+	lac ptr
+	add one
+	dac ptr
+	lac tmp
+	sad zend
+	 jmp render
+	sub plz
+	sma
+	 jmp loop
+	dac dz
+	lac hwraw
+	mul prjraw
+	div dz
+	jmp .+1
+	dac oxr
+	lac ply
+	mul prjraw
+	div dz
+	jmp .+1
+	dac oyr
+	lac oxr
+	cma
+	dac xr
+	lac oyr
+	cma
+	dac yr
+	jsp dot
+	lac oxr
+	dac xr
+	lac oyr
+	cma
+	dac yr
+	jsp dot
+	jmp loop
+render,
+	jmp main
+dot,	dac ret
+	lac xr
+	lio yr
+	dpy
+	jmp i ret
+
+mask0,	1
+mask1,	2
+mask2,	4
+
+start start

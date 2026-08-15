@@ -1,0 +1,127 @@
+/ typewriter input/output exercise (Siggy exercise)
+/
+endm,   777777
+one,    1
+m077,   077
+/
+rtprs,  0
+rtout,  0
+rtrdn,  0
+rtinc,  0
+rtprn,  0
+bufp,   0
+/
+/ FIO string: "Hello, user. What is your name? " + CRLF
+pstr,   074 070 072 065 043 043 046 033 000  / H   e   l   l   o   ,  sp
+        024 022 065 051 073 000               / u   s   e   r   .  sp
+        074 026 072 070 061 023 000           / W   h   a   t  sp
+        071 022 000                           / i   s  sp
+        030 046 024 051 000                   / y   o   u   r  sp
+        045 061 044 065 021 000               / n   a   m   e  ?  sp
+        077 077 777777                        / CRLF CRLF end
+/
+/ "Hello, "
+gstr,   074 070 072 065 043 043 046 033 000
+        777777
+/
+/ "!" + CRLF
+estr,   074 021 072 077 077
+        777777
+/
+crflf,  077
+/
+/ Name buffer
+nbuf,   0 0 0 0 0 0 0 0 0 0
+        0 0 0 0 0 0 0 0 0 0
+        0 0 0 0 0 0 0 0 0 0
+        0 0 0 0 0 0 0 0 0 0
+/
+tmp,    0
+chr,    0
+strp,   0
+/
+go,     law pstr
+        dac strp
+        jsp prstr
+        jsp rdnam
+        law gstr
+        dac strp
+        jsp prstr
+        jsp prnam
+        law estr
+        dac strp
+        jsp prstr
+        jmp go
+/
+prstr,  dac rtprs
+pslp,   lac i strp
+        sad endm
+        jmp i rtprs
+        dac chr
+        jsp outch
+        lac strp
+        add one
+        dac strp
+        jmp pslp
+/
+outch,  dac rtout
+outw,   cks
+        dio tmp
+        lac tmp
+        ral 2s
+        sma
+        jmp outw
+        lac chr
+        dio tmp
+        lio tmp
+        tyo
+        jmp i rtout
+/
+rdnam,  dac rtrdn
+        law nbuf
+        dac bufp
+rdlp,   jsp inchr
+        lac chr
+        sad crflf
+        jmp i rtrdn
+        jsp outch
+        lac chr
+        dac i bufp
+        lac bufp
+        add one
+        dac bufp
+        jmp rdlp
+/
+inchr,  dac rtinc
+inw,    cks
+        dio tmp
+        lac tmp
+        ral 3s
+        sma
+        jmp inw
+        tyi
+        dio tmp
+        lac tmp
+        and m077
+        dac chr
+        jmp i rtinc
+/
+prnam,  dac rtprn
+        law nbuf
+        dac bufp
+pnlp,   lac i bufp
+        sad endm
+        jmp i rtprn
+        sad crflf
+        jmp i rtprn
+        sza
+        jmp pnshp
+        jmp i rtprn
+pnshp,  dac chr
+        jsp outch
+        lac bufp
+        add one
+        dac bufp
+        jmp pnlp
+
+        start go               / entry point (must be LAST line)

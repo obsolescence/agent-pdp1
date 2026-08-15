@@ -1,0 +1,690 @@
+#!/usr/bin/env python3
+"""
+pdp1_peek — Type 30 display analysis tool (skill: pdp1-type30-analysis).
+
+Usage:
+  pdp1_dpy display [-r] [--secs N] [--snapshot FILE] [--host HOST] [--port PORT]
+                   [--stats] [--grid [N]] [--point X,Y ...] [--region X1,Y1,X2,Y2]
+                   [--expect SPEC] [--png] [--bbox] [--style binary|pattern]
+                   [--frames N] [--against FILE] [--save FILE] [--out FILE]
+                   [--demo] [--self-test]
+
+(pdp1_dpy is the installed name of this skill's tool; the script file is
+scripts/pdp1_peek, and sites may alias either name.)
+
+Snapshot rules:
+  -r is the ONLY write: it captures fresh and replaces the snapshot.
+  Questions (stats/grid/point/region/expect/png/diff) read the existing
+  snapshot; without one they error (exit 1) — there is no auto-capture.
+  Every answer prints the snapshot identity + age line, so staleness is
+  visible and refresh is deliberate.
+
+Exit codes:
+  0 = ok, 1 = connection / no data / missing or corrupt snapshot,
+  2 = --expect failed.
+
+Portability:
+  The display stream endpoint is --host/--port (default 127.0.0.1:3400,
+  the emulator's Type 30 port, fanned out to 4 clients). Env fallbacks:
+  PDP1_DISPLAY_PORT, PDP1_SNAPSHOT. No fixed paths.
+"""
+import argparse
+import math
+import os
+import socket
+import struct
+import sys
+import time
+import zlib
+
+MAGIC = b"P1SN"
+SNAP_VERSION = 1
+HDR = struct.Struct("<4sHHIf")  # 16 bytes: magic, version, reserved, captured_at, duration
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 3400
+EXIT_OK = 0
+EXIT_DATA = 1
+EXIT_EXPECT = 2
+
+# Skill root = two levels up from this script (scripts/pdp1_peek -> skill dir).
+# realpath, not abspath: the tool is usually invoked through a symlink
+# (e.g. ~/.local/bin/pdp1_dpy), and abspath would resolve fixtures next to
+# the SYMLINK instead of next to the real script.
+SKILL_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+FIXTURE_DIR = os.path.join(SKILL_DIR, "test", "fixtures")
+
+
+# ---------------------------------------------------------------- paths ---
+
+def default_snapshot_path():
+    d = os.environ.get("TMPDIR") or "/tmp"
+    return os.path.join(d, "pdp1_dpy.snp")
+
+
+def resolve_snapshot(args):
+    if args.snapshot:
+        return args.snapshot
+    return os.environ.get("PDP1_SNAPSHOT") or default_snapshot_path()
+
+
+def resolve_port(args):
+    if args.port:
+        return args.port
+    return int(os.environ.get("PDP1_DISPLAY_PORT") or DEFAULT_PORT)
+
+
+# ---------------------------------------------------------- snapshot IO ---
+
+class SnapshotError(Exception):
+    pass
+
+
+def save_snapshot(path, words, captured_at, duration):
+    """Write header + raw 32-bit LE words. Atomic-ish: tmp then rename."""
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(HDR.pack(MAGIC, SNAP_VERSION, 0, int(captured_at), float(duration)))
+        for w in words:
+            f.write(struct.pack("<I", w))
+    os.replace(tmp, path)
+
+
+def load_snapshot(path):
+    """Read header + raw words. Raises SnapshotError on any corruption."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if len(data) < HDR.size:
+        raise SnapshotError("snapshot %s is corrupt or not a snapshot file" % path)
+    magic, ver, _res, captured_at, duration = HDR.unpack_from(data, 0)
+    if magic != MAGIC or ver != SNAP_VERSION:
+        raise SnapshotError("snapshot %s is corrupt or not a snapshot file" % path)
+    body = data[HDR.size:]
+    if len(body) % 4:
+        raise SnapshotError("snapshot %s is corrupt (trailing partial word)" % path)
+    words = [struct.unpack_from("<I", body, i)[0] for i in range(0, len(body), 4)]
+    meta = {"captured_at": captured_at, "duration": duration, "words": len(words)}
+    return words, meta
+
+
+# --------------------------------------------------------------- capture ---
+
+def capture(host, port, secs):
+    """Connect to the display stream, collect raw 32-bit LE words for secs.
+
+    Connection problems exit 1 with a clear message. A connected but silent
+    display (0 words) is a VALID capture — the analysis will report it.
+    """
+    t0 = time.time()
+    deadline = t0 + secs
+    words = []
+    sock = None
+    try:
+        sock = socket.socket()
+        sock.settimeout(3)
+        sock.connect((host, port))
+    except (ConnectionRefusedError, OSError) as e:
+        print("cannot connect to %s:%d — is the emulator running? (%s)"
+              % (host, port, e), file=sys.stderr)
+        sys.exit(EXIT_DATA)
+    except socket.timeout:
+        print("connection to %s:%d timed out" % (host, port), file=sys.stderr)
+        sys.exit(EXIT_DATA)
+    try:
+        sock.settimeout(secs + 1)
+        while time.time() < deadline:
+            try:
+                data = sock.recv(65536)
+            except socket.timeout:
+                break
+            if not data:
+                break
+            for i in range(0, len(data) - 3, 4):
+                words.append(struct.unpack("<I", data[i:i + 4])[0])
+    finally:
+        if sock:
+            sock.close()
+    return words, int(t0), secs
+
+
+def parse_words(words):
+    """words -> (points dict {(x,y): max_intensity}, total word count).
+
+    Type 30 protocol per 32-bit word: x = bits 0-9, y = bits 10-19,
+    intensity = bits 20-22, dt = bits 23-31. dt==511 marks an escape: the
+    NEXT word is a raw delay value, not a point. Null points (x=0, y=0,
+    intensity=0) are skipped. Points dedupe keeping max intensity.
+    """
+    points = {}
+    total = 0
+    escape = False
+    for w in words:
+        total += 1
+        dt = (w >> 23) & 0x1FF
+        if escape:
+            escape = False
+            continue
+        if dt == 0x1FF:
+            escape = True
+            continue
+        x = w & 0x3FF
+        y = (w >> 10) & 0x3FF
+        intens = (w >> 20) & 7
+        if intens == 0 and x == 0 and y == 0:
+            continue
+        key = (x, y)
+        if key in points:
+            if intens > points[key]:
+                points[key] = intens
+        else:
+            points[key] = intens
+    return points, total
+
+
+# ------------------------------------------------------------- questions ---
+
+def query_stats(points, total_cmds, meta):
+    """Summary: unique points, extent, 8x8 occupancy (top row first)."""
+    print("points: %d unique  (%d words in snapshot)" % (len(points), total_cmds))
+    if not points:
+        print("no visible points (display is dark)")
+        return
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    print("extent: x=[%d-%d]  y=[%d-%d]" % (min(xs), max(xs), min(ys), max(ys)))
+    occ = [[0] * 8 for _ in range(8)]
+    for (x, y) in points:
+        occ[y * 8 // 1024][x * 8 // 1024] += 1
+    print("8x8 occupancy (top row first):")
+    for r in range(7, -1, -1):
+        print("  " + " ".join("%4d" % occ[r][c] for c in range(8)))
+
+
+def query_point(points, x, y):
+    if (x, y) in points:
+        print("point %d,%d: ON (intensity %d)" % (x, y, points[(x, y)]))
+    else:
+        print("point %d,%d: OFF" % (x, y))
+
+
+def query_region(points, x1, y1, x2, y2):
+    if x1 > x2:
+        x1, x2 = x2, x1
+    if y1 > y2:
+        y1, y2 = y2, y1
+    n = sum(1 for (x, y) in points if x1 <= x <= x2 and y1 <= y <= y2)
+    print("region (%d,%d)-(%d,%d): %d point%s"
+          % (x1, y1, x2, y2, n, "" if n == 1 else "s"))
+
+
+def _region_bounds(points, region, bbox):
+    """Return (x0, y0, x1, y1) in display space for the grid mapping."""
+    if region:
+        x0, y0, x1, y1 = region
+        if x0 > x1:
+            x0, x1 = x1, x0
+        if y0 > y1:
+            y0, y1 = y1, y0
+        return x0, y0, x1, y1
+    if bbox and points:
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        return min(xs), min(ys), max(xs), max(ys)
+    return 0, 0, 1023, 1023
+
+
+def _cell_glyph(points_in_cell, cw, ch, style):
+    """One grid cell -> glyph. style 'binary' or 'pattern'.
+
+    Pattern decision table (geometric, semantic-free — derived from the
+    point statistics of THIS cell only):
+      count == 0                       -> ' '
+      count < 4                        -> '.'
+      sigma_x >> sigma_y               -> '-'  (horizontal stroke)
+      sigma_y >> sigma_x               -> '|'  (vertical stroke)
+      strong covariance, both spreads  -> '/' or '\\'  (diagonal; |rho|>0.7
+                                           keeps true diagonals — collinear
+                                           samples give |rho|~1 even when
+                                           sparse — while under-sampled
+                                           crossings fall through)
+      both spreads large, no direction -> '+'  (cross / solid / arc — many
+                                           points, no dominant orientation)
+      both spreads small               -> '*'  (tight cluster / point source)
+      else                             -> ':' '#'  (scatter/fill, by count)
+    """
+    n = len(points_in_cell)
+    if n == 0:
+        return " "
+    if style == "binary":
+        return "*"
+    if n < 4:
+        return "."
+    xs = [p[0] for p in points_in_cell]
+    ys = [p[1] for p in points_in_cell]
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    vx = sum((x - mx) ** 2 for x in xs) / n
+    vy = sum((y - my) ** 2 for y in ys) / n
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / n
+    sx = math.sqrt(vx)
+    sy = math.sqrt(vy)
+    if sx > 2.5 * sy and sx > 0.1 * cw:
+        return "-"
+    if sy > 2.5 * sx and sy > 0.1 * ch:
+        return "|"
+    if sx * sy > 0 and abs(cov / (sx * sy)) > 0.7 and sx > 0.3 * cw and sy > 0.3 * ch:
+        return "/" if cov < 0 else "\\"
+    if sx > 0.3 * cw and sy > 0.3 * ch:
+        return "+"
+    if sx < 0.2 * cw and sy < 0.2 * ch:
+        return "*"
+    if n < 10:
+        return ":"
+    return "#"
+
+
+def _render_one(points, size, style, region, bbox, against_points):
+    """Render one grid (binary or pattern, optionally diffed)."""
+    x0, y0, x1, y1 = _region_bounds(points, region, bbox)
+    W = size
+    H = max(1, round(W * (y1 - y0 + 1) / (x1 - x0 + 1)))
+    cw = (x1 - x0 + 1) / W
+    ch = (y1 - y0 + 1) / H
+
+    # bucket points into cells
+    cells = {}
+    for (x, y), intens in points.items():
+        col = (x - x0) * W // (x1 - x0 + 1)
+        row = H - 1 - ((y - y0) * H // (y1 - y0 + 1))
+        col = min(W - 1, max(0, col))
+        row = min(H - 1, max(0, row))
+        cells.setdefault((row, col), []).append((x, y, intens))
+
+    if against_points is not None:
+        a_cells = set()
+        for (x, y) in against_points:
+            col = (x - x0) * W // (x1 - x0 + 1)
+            row = H - 1 - ((y - y0) * H // (y1 - y0 + 1))
+            col = min(W - 1, max(0, col))
+            row = min(H - 1, max(0, row))
+            a_cells.add((row, col))
+
+    for r in range(H):
+        out = []
+        for c in range(W):
+            key = (r, c)
+            if against_points is not None:
+                in_base = key in cells
+                in_other = key in a_cells
+                if in_base and not in_other:
+                    out.append("X")
+                elif in_other and not in_base:
+                    out.append(".")
+                else:
+                    out.append(" ")
+            else:
+                out.append(_cell_glyph(cells.get(key, []), cw, ch, style))
+        print("".join(out))
+    print("grid %dx%d region (%d,%d)-(%d,%d)" % (W, H, x0, y0, x1, y1))
+
+
+def render_grid(points, words, size, style, region, bbox, frames, against_points):
+    """ASCII grid. frames > 1 slices the raw word stream (flipbook)."""
+    if region:
+        try:
+            region = tuple(int(v) for v in region.split(","))
+            assert len(region) == 4
+        except (ValueError, AssertionError):
+            print("invalid --region %r (want X1,Y1,X2,Y2)" % (region,), file=sys.stderr)
+            return
+    if frames and frames > 1 and words:
+        # flipbook: slice by word count; each slice is one frame
+        chunk = max(1, len(words) // frames)
+        for f in range(frames):
+            slice_words = words[f * chunk:(f + 1) * chunk]
+            f_points, _ = parse_words(slice_words)
+            print("--- frame %d/%d ---" % (f + 1, frames))
+            _render_one(f_points, size, style, region, bbox, None)
+    else:
+        _render_one(points, size, style, region, bbox, against_points)
+
+
+def fingerprint(points):
+    """Deterministic display fingerprint: (count, 8x8 occupancy, extent)."""
+    occ = [0] * 64
+    for (x, y) in points:
+        occ[(y * 8 // 1024) * 8 + (x * 8 // 1024)] += 1
+    if points:
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        extent = (min(xs), min(ys), max(xs), max(ys))
+    else:
+        extent = None
+    return (len(points), tuple(occ), extent)
+
+
+def expect_check(points, spec, snap_path):
+    """Assertions: cell=X,Y (must be lit) and same-as=FILE (fingerprint).
+
+    All must pass; exit 2 on any failure. Exit 1 remains reserved for
+    data problems (missing/corrupt snapshot), handled by the caller.
+    """
+    ok = True
+    for item in spec.split(";"):
+        item = item.strip()
+        if not item:
+            continue
+        if item.startswith("cell="):
+            try:
+                x, y = (int(v) for v in item[5:].split(","))
+            except ValueError:
+                print("FAIL %r — want cell=X,Y" % item)
+                ok = False
+                continue
+            if (x, y) in points:
+                print("PASS cell=%d,%d (intensity %d)" % (x, y, points[(x, y)]))
+            else:
+                print("FAIL cell=%d,%d — point is OFF" % (x, y))
+                ok = False
+        elif item.startswith("same-as="):
+            path = item[8:]
+            try:
+                o_words, _ = load_snapshot(path)
+                o_points, _ = parse_words(o_words)
+            except (SnapshotError, OSError) as e:
+                print("FAIL same-as=%s — %s" % (path, e))
+                ok = False
+                continue
+            f1 = fingerprint(points)
+            f2 = fingerprint(o_points)
+            tol = max(1, round(0.05 * f2[0]))
+            if abs(f1[0] - f2[0]) <= tol and f1[1] == f2[1] and f1[2] == f2[2]:
+                print("PASS same-as=%s (%d pts, fingerprint match)" % (path, f1[0]))
+            else:
+                print("FAIL same-as=%s — %d pts vs %d, occupancy/extent differ"
+                      % (path, f1[0], f2[0]))
+                ok = False
+        else:
+            print("FAIL unknown expect item: %r" % item)
+            ok = False
+    return EXIT_OK if ok else EXIT_EXPECT
+
+
+def _png_chunk(tag, data):
+    c = struct.pack(">I", len(data)) + tag + data
+    return c + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+
+def write_png(points, out, bbox):
+    """Render the snapshot as a green-phosphor PNG (stdlib writer).
+
+    512x512 (or bbox-cropped), intensity 0-7 -> green ramp 0-252.
+    """
+    W = 512
+    if bbox and points:
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+    else:
+        x0, y0, x1, y1 = 0, 0, 1023, 1023
+    img = [[0] * W for _ in range(W)]
+    for (x, y), intens in points.items():
+        px = (x - x0) * W // (x1 - x0 + 1)
+        py = W - 1 - ((y - y0) * W // (y1 - y0 + 1))
+        px = min(W - 1, max(0, px))
+        py = min(W - 1, max(0, py))
+        if intens > img[py][px]:
+            img[py][px] = intens
+    raw = b""
+    for row in img:
+        raw += b"\x00"  # filter: none
+        for v in row:
+            g = v * 36  # 0..252
+            raw += bytes((0, g, 0))
+    ihdr = struct.pack(">IIBBBBB", W, W, 8, 2, 0, 0, 0)
+    png = (b"\x89PNG\r\n\x1a\n"
+           + _png_chunk(b"IHDR", ihdr)
+           + _png_chunk(b"IDAT", zlib.compress(raw, 9))
+           + _png_chunk(b"IEND", b""))
+    with open(out, "wb") as f:
+        f.write(png)
+    print("PNG saved to %s (%dx%d, %d pts)" % (out, W, W, len(points)))
+
+
+def self_test():
+    """Golden fixture suite: PASS/FAIL per check, exit 0/1."""
+    def load(name):
+        path = os.path.join(FIXTURE_DIR, name + ".snp")
+        words, meta = load_snapshot(path)
+        points, total = parse_words(words)
+        return points, total
+
+    results = []
+
+    def check(name, cond, detail=""):
+        results.append((name, cond))
+        print("%s %s%s" % ("PASS" if cond else "FAIL", name,
+                           (" — " + detail) if detail else ""))
+
+    # --- tictactoe: known structure -------------------------------------
+    pts, total = load("tictactoe")
+    check("tictactoe unique points == 1151", len(pts) == 1151, str(len(pts)))
+    check("tictactoe board crossing lit", (341, 341) in pts)
+    check("tictactoe X diagonal lit", (515, 509) in pts)
+    check("tictactoe empty corner OFF", (999, 999) not in pts)
+    n = sum(1 for (x, y) in pts if 343 <= x <= 681 and 343 <= y <= 681)
+    check("tictactoe center cell has 86 X pts", n == 86, str(n))
+    # pattern glyphs on a 48-grid (cw = ch = 1024/48)
+    cw = ch = 1024 / 48
+    g = _cell_glyph([(341, y, 3) for y in range(500, 540)], cw, ch, "pattern")
+    check("pattern: vertical stroke -> '|'", g == "|", repr(g))
+    g = _cell_glyph([(x, 341, 3) for x in range(500, 540)], cw, ch, "pattern")
+    check("pattern: horizontal stroke -> '-'", g == "-", repr(g))
+    g = _cell_glyph([(500 + t, 500 + t, 7) for t in range(0, 40)], cw, ch, "pattern")
+    check("pattern: diagonal -> '/' or '\\'", g in ("/", "\\"), repr(g))
+    cross = [(341, y, 3) for y in range(500, 540)] + [(x, 500, 3) for x in range(320, 362)]
+    g = _cell_glyph(cross, cw, ch, "pattern")
+    check("pattern: crossing -> '+'", g == "+", repr(g))
+    # binary glyph
+    g = _cell_glyph([(341, 512, 3)], cw, ch, "binary")
+    check("binary: any point -> '*'", g == "*", repr(g))
+
+    # --- cube -------------------------------------------------------------
+    pts, total = load("cube")
+    check("cube unique points == 726", len(pts) == 726, str(len(pts)))
+    check("cube corner lit", (350, 350) in pts and (734, 734) in pts)
+
+    # --- scatter ------------------------------------------------------------
+    pts, total = load("scatter")
+    check("scatter unique points == 1500", len(pts) == 1500, str(len(pts)))
+    xs = [p[0] for p in pts]
+    check("scatter fills width", min(xs) < 50 and max(xs) > 973,
+          "x=[%d-%d]" % (min(xs), max(xs)))
+
+    # --- empty -------------------------------------------------------------
+    pts, total = load("empty")
+    check("empty has 0 unique points", len(pts) == 0, str(len(pts)))
+
+    # --- fingerprint / same-as ----------------------------------------------
+    a, _ = load("tictactoe")
+    b, _ = load("scatter")
+    check("fingerprint: tictactoe == itself", fingerprint(a) == fingerprint(a))
+    check("fingerprint: tictactoe != scatter", fingerprint(a) != fingerprint(b))
+
+    # --- demo fixture present and matches tictactoe --------------------------
+    demo_path = os.path.join(FIXTURE_DIR, "demo.snp")
+    check("demo.snp exists", os.path.exists(demo_path))
+    if os.path.exists(demo_path):
+        d, _ = parse_words(load_snapshot(demo_path)[0])
+        check("demo.snp == tictactoe fingerprint", fingerprint(d) == fingerprint(a))
+
+    passed = sum(1 for _, c in results if c)
+    print("\n%d/%d checks passed" % (passed, len(results)))
+    return EXIT_OK if passed == len(results) else EXIT_DATA
+
+
+# ------------------------------------------------------------ age line ---
+
+def age_line(path, meta, points, total_cmds):
+    """'snapshot 14:03:22 (0.5s, N words, M pts, 2.1s old)'"""
+    age = time.time() - meta["captured_at"]
+    ts = time.strftime("%H:%M:%S", time.localtime(meta["captured_at"]))
+    print("snapshot %s captured %s (%.1fs, %d words, %d pts, %.1fs old)"
+          % (path, ts, meta["duration"], total_cmds, len(points), max(age, 0.0)))
+
+
+# ----------------------------------------------------------------- main ---
+
+def parse_point_pair(s):
+    x, y = s.split(",")
+    return int(x), int(y)
+
+
+def cmd_display(args):
+    if args.self_test:
+        return self_test()
+
+    if args.demo:
+        # bundled demo capture — no machine needed; -r/--save/--secs irrelevant
+        snap = os.path.join(FIXTURE_DIR, "demo.snp")
+        if not os.path.exists(snap):
+            print("demo fixture missing: %s (run make_fixtures.py)" % snap,
+                  file=sys.stderr)
+            return EXIT_DATA
+    else:
+        snap = resolve_snapshot(args)
+        host = args.host
+        port = resolve_port(args)
+
+        if args.refresh:
+            if not args.secs:
+                args.secs = 0.5
+            words, captured_at, duration = capture(host, port, args.secs)
+            save_snapshot(snap, words, captured_at, duration)
+
+        if args.save:
+            if not os.path.exists(snap):
+                print("snapshot %s is missing — cannot --save" % snap, file=sys.stderr)
+                return EXIT_DATA
+            with open(snap, "rb") as f:
+                data = f.read()
+            with open(args.save, "wb") as f:
+                f.write(data)
+            print("snapshot saved to %s" % args.save)
+
+        if not os.path.exists(snap):
+            print("no snapshot at %s — run with -r to capture" % snap, file=sys.stderr)
+            return EXIT_DATA
+
+    try:
+        words, meta = load_snapshot(snap)
+    except SnapshotError as e:
+        print(e, file=sys.stderr)
+        return EXIT_DATA
+    points, total_cmds = parse_words(words)
+
+    # --save with -r: saved above; fall through to the question
+
+    age_line(snap, meta, points, total_cmds)
+
+    if args.against:
+        if not os.path.exists(args.against):
+            print("snapshot %s is missing — cannot diff" % args.against, file=sys.stderr)
+            return EXIT_DATA
+        o_words, o_meta = load_snapshot(args.against)
+        against_points, _ = parse_words(o_words)
+    else:
+        against_points = None
+
+    if args.point:
+        for xy in args.point:
+            x, y = parse_point_pair(xy)
+            query_point(points, x, y)
+        return EXIT_OK
+    if args.region is not None:
+        try:
+            x1, y1, x2, y2 = (int(v) for v in args.region.split(","))
+        except ValueError:
+            print("invalid --region %r (want X1,Y1,X2,Y2)" % args.region, file=sys.stderr)
+            return EXIT_DATA
+        query_region(points, x1, y1, x2, y2)
+        return EXIT_OK
+    if args.expect:
+        return expect_check(points, args.expect, snap)
+    if args.grid is not None:
+        render_grid(points, words, args.grid, args.style, args.region, args.bbox,
+                    args.frames, against_points)
+        return EXIT_OK
+    if args.png:
+        out = args.out or os.path.join(os.environ.get("TMPDIR") or "/tmp", "pdp1_dpy.png")
+        write_png(points, out, args.bbox)
+        return EXIT_OK
+    query_stats(points, total_cmds, meta)
+    return EXIT_OK
+
+
+def build_parser():
+    # prog=None -> usage shows the name the tool was invoked under
+    # (pdp1_dpy, pdp1_peek, or any alias the site chose)
+    p = argparse.ArgumentParser(
+        prog=None,
+        description="PDP-1 Type 30 display analysis (skill: pdp1-type30-analysis). "
+                    "Capture with -r, then ask questions against the snapshot.",
+        epilog=("Snapshot rules: -r is the only write; questions error without a "
+                "snapshot. Exit codes: 0 ok, 1 data problem, 2 --expect failed. "
+                "Portability: --host/--port and env PDP1_DISPLAY_PORT, PDP1_SNAPSHOT."),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    d = sub.add_parser("display", help="Type 30 display capture and analysis",
+                       description=__doc__,
+                       formatter_class=argparse.RawDescriptionHelpFormatter)
+    d.add_argument("-r", "--refresh", action="store_true",
+                   help="capture a fresh snapshot (the only write)")
+    d.add_argument("--secs", type=float, default=None,
+                   help="capture window in seconds (with -r; default 0.5)")
+    d.add_argument("--snapshot", metavar="FILE",
+                   help="use FILE as the snapshot for this run (must exist unless -r)")
+    d.add_argument("--host", default=DEFAULT_HOST, help="display stream host (default %(default)s)")
+    d.add_argument("--port", type=int, default=None,
+                   help="display stream port (default: env PDP1_DISPLAY_PORT or 3400)")
+    d.add_argument("--stats", action="store_true",
+                   help="summary: points, unique, extent, 8x8 occupancy (default question)")
+    d.add_argument("--grid", nargs="?", type=int, const=64, default=None,
+                   metavar="N", help="ASCII grid, N columns (default 64)")
+    d.add_argument("--point", action="append", metavar="X,Y",
+                   help="is point X,Y lit? ON/OFF — repeatable")
+    d.add_argument("--region", metavar="X1,Y1,X2,Y2",
+                   help="print the point count in the display-space rectangle")
+    d.add_argument("--expect", metavar="SPEC",
+                   help="assertions: cell=X,Y ; same-as=FILE (all must pass, exit 2 on fail)")
+    d.add_argument("--png", action="store_true", help="write a rendered PNG of the snapshot")
+    d.add_argument("--out", metavar="FILE",
+                   help="output path for --png (default $TMPDIR/pdp1_dpy.png or /tmp/pdp1_dpy.png)")
+    d.add_argument("--bbox", action="store_true",
+                   help="fit grid/PNG to content extents instead of the full display")
+    d.add_argument("--style", choices=["binary", "pattern"], default="binary",
+                   help="grid glyph alphabet: binary = * and space (default); pattern = geometric glyphs")
+    d.add_argument("--frames", type=int, default=None,
+                   help="render the grid as N time slices (flipbook)")
+    d.add_argument("--against", metavar="FILE",
+                   help="3-state diff grid vs another snapshot: X new, . gone, ' ' unchanged")
+    d.add_argument("--save", metavar="FILE",
+                   help="copy the current snapshot to FILE (archive; needs an existing snapshot)")
+    d.add_argument("--demo", action="store_true",
+                   help="run the question against the bundled demo capture (no machine needed)")
+    d.add_argument("--self-test", action="store_true",
+                   help="run the golden fixture suite, report PASS/FAIL")
+    d.set_defaults(func=cmd_display)
+    return p
+
+
+def main():
+    args = build_parser().parse_args()
+    try:
+        sys.exit(args.func(args))
+    except NotImplementedError as e:
+        print("not implemented yet: %s" % e, file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

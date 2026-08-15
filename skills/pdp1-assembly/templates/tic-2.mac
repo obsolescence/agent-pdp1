@@ -1,0 +1,257 @@
+/ tic-tac-toe for PDP-1 Type 30 display
+/ Step 2: board state + draw crosses and noughts in every cell
+/
+/ Board state: 9 words in memory, one per cell
+/   0 = empty, 1 = cross, 2 = nought
+/ Cells indexed row-major: [0][1][2] top row, [3][4][5] middle, [6][7][8] bottom
+/
+/ for macro1_1: start must be LAST line
+
+one,	1			/ used to decrement counters
+two,	2			/ nought marker
+nstep,	200			/ 128 steps per line
+cnstep,	400			/ 256 steps for circle (nought)
+hs,	20000			/ half-side per cell (32 px)
+chs,	12525			/ half-side for crosses (2/3 of hs)
+nrad,	12525			/ nought radius (2/3 of hs)
+
+left,	717777			/ -0o60000 -> screen 416
+mid1,	757777			/ -0o20000 -> screen 480
+mid2,	20000			/ +0o20000 -> screen 544
+right,	60000			/ +0o60000 -> screen 608
+bot,	717777			/ -0o60000
+midy1,	757777			/ -0o20000
+midy2,	20000			/ +0o20000
+top,	60000			/ +0o60000
+
+cc0x,	737777			/ column 0 center (-0o40000)
+cc1x,	0			/ column 1 center
+cc2x,	40000			/ column 2 center (+0o40000)
+cr0y,	737777			/ row 0 center (-0o40000)
+cr1y,	0			/ row 1 center
+cr2y,	40000			/ row 2 center (+0o40000)
+
+board,	2			/ nought (demo pattern)
+	1			/ cross
+	1
+	1
+	2
+	1
+	1
+	1
+	2
+
+fx,	0
+fy,	0
+tx,	0
+ty,	0
+cx,	0
+cy,	0
+ct,	0
+dx,	0
+dy,	0
+
+bptr,	0
+bcx,	0
+bcy,	0
+
+gr4ret,	0
+dwret,	0
+bdret,	0
+crret,	0
+noret,	0
+dcret,	0
+tmp,	0
+
+go,	jsp grid4		/ draw grid lines
+	jsp drawboard		/ draw crosses and noughts
+	jmp go
+
+grid4,	dac gr4ret
+	lac mid1
+	dac fx
+	lac top
+	dac fy
+	lac mid1
+	dac tx
+	lac bot
+	dac ty
+	jsp draw
+	lac mid2
+	dac fx
+	lac top
+	dac fy
+	lac mid2
+	dac tx
+	lac bot
+	dac ty
+	jsp draw
+	lac left
+	dac fx
+	lac midy1
+	dac fy
+	lac right
+	dac tx
+	lac midy1
+	dac ty
+	jsp draw
+	lac left
+	dac fx
+	lac midy2
+	dac fy
+	lac right
+	dac tx
+	lac midy2
+	dac ty
+	jsp draw
+	jmp i gr4ret
+
+drawboard, dac bdret
+	law board
+	dac bptr
+	lac cr0y
+	dac bcy
+	lac cc0x
+	dac bcx
+	jsp drawcell
+	lac cc1x
+	dac bcx
+	jsp drawcell
+	lac cc2x
+	dac bcx
+	jsp drawcell
+	lac cr1y
+	dac bcy
+	lac cc0x
+	dac bcx
+	jsp drawcell
+	lac cc1x
+	dac bcx
+	jsp drawcell
+	lac cc2x
+	dac bcx
+	jsp drawcell
+	lac cr2y
+	dac bcy
+	lac cc0x
+	dac bcx
+	jsp drawcell
+	lac cc1x
+	dac bcx
+	jsp drawcell
+	lac cc2x
+	dac bcx
+	jsp drawcell
+	jmp i bdret
+
+drawcell, dac dcret
+	lac i bptr
+	sad one
+	jsp drawcross
+	sad two
+	jsp drawnought
+nextcell, lac bptr
+	add one
+	dac bptr
+	jmp i dcret
+
+drawcross, dac crret
+	lac bcx
+	add nchs
+	dac fx
+	lac bcy
+	add nchs
+	dac fy
+	lac bcx
+	add chs
+	dac tx
+	lac bcy
+	add chs
+	dac ty
+	jsp draw
+	lac bcx
+	add chs
+	dac fx
+	lac bcy
+	add nchs
+	dac fy
+	lac bcx
+	add nchs
+	dac tx
+	lac bcy
+	add chs
+	dac ty
+	jsp draw
+	jmp i crret
+
+drawnought, dac noret
+	lac nrad
+	dac cx
+	lac zero
+	dac cy
+	lac cnstep
+	dac ct
+nloop,	lac cy
+	add bcy
+	dac tmp
+	lac cx
+	add bcx
+	lio tmp
+	dpy
+	dpy
+	lac cx
+	cma
+	sar 4s
+	add cy
+	dac cy
+	lio cy
+	sar 4s
+	add cx
+	dac cx
+	lac ct
+	sub one
+	dac ct
+	sza
+	jmp nloop
+	jmp i noret
+
+draw,	dac dwret
+	lac fx
+	cma
+	add tx
+	sar 7s
+	dac dx
+	lac fy
+	cma
+	add ty
+	sar 7s
+	dac dy
+	lac fx
+	dac cx
+	lac fy
+	dac cy
+	lac nstep
+	dac ct
+eloop,	lac ct
+	sza
+	jmp elbody
+	jmp i dwret
+elbody,	lac cx
+	lio cy
+	dpy
+	dpy
+	lac cx
+	add dx
+	dac cx
+	lac cy
+	add dy
+	dac cy
+	lac ct
+	sub one
+	dac ct
+	jmp eloop
+
+nhs,	757777
+nchs,	765252
+zero,	0
+	start go

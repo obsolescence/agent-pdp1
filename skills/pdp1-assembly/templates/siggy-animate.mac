@@ -1,0 +1,175 @@
+/ animated Type 30 display demo (Siggy exercise)
+/
+retadr, 0
+zero,   0
+one,    1
+n,      200
+vx,     4000
+vy,     2000
+/
+c0x,    677777
+c0y,    100000
+c1x,    100000
+c1y,    100000
+c2x,    100000
+c2y,    677777
+c3x,    677777
+c3y,    677777
+/
+fx,     0
+fy,     0
+tx,     0
+ty,     0
+cx,     0
+cy,     0
+dx,     0
+dy,     0
+ct,     0
+/
+go,     jmp loop
+/
+draw,   dac retadr
+        lac fx
+        cma
+        add tx
+        sar 7s
+        dac dx
+        lac fy
+        cma
+        add ty
+        sar 7s
+        dac dy
+        lac fx
+        dac cx
+        lac fy
+        dac cy
+        lac n
+        dac ct
+/
+eloop,  lac ct
+        sza
+        jmp elbody
+        jmp i retadr
+/
+elbody, lac cx
+        lio cy
+        dpy
+        lac cx
+        add dx
+        dac cx
+        lac cy
+        add dy
+        dac cy
+        lac ct
+        sub one
+        dac ct
+        jmp eloop
+/
+loop,
+        lac c0x
+        dac fx
+        lac c0y
+        dac fy
+        lac c1x
+        dac tx
+        lac c1y
+        dac ty
+        jsp draw
+/
+        lac c1x
+        dac fx
+        lac c1y
+        dac fy
+        lac c2x
+        dac tx
+        lac c2y
+        dac ty
+        jsp draw
+/
+        lac c2x
+        dac fx
+        lac c2y
+        dac fy
+        lac c3x
+        dac tx
+        lac c3y
+        dac ty
+        jsp draw
+/
+        lac c3x
+        dac fx
+        lac c3y
+        dac fy
+        lac c0x
+        dac tx
+        lac c0y
+        dac ty
+        jsp draw
+/
+/ rotation
+        lac c0x
+        cma
+        sar 4s
+        add c0y
+        dac c0y
+        lio c0y
+        sar 4s
+        add c0x
+        dac c0x
+        lac c1x
+        cma
+        sar 4s
+        add c1y
+        dac c1y
+        lio c1y
+        sar 4s
+        add c1x
+        dac c1x
+        lac c2x
+        cma
+        sar 4s
+        add c2y
+        dac c2y
+        lio c2y
+        sar 4s
+        add c2x
+        dac c2x
+        lac c3x
+        cma
+        sar 4s
+        add c3y
+        dac c3y
+        lio c3y
+        sar 4s
+        add c3x
+        dac c3x
+/
+/ drift
+        lac c0x
+        add vx
+        dac c0x
+        lac c0y
+        add vy
+        dac c0y
+        lac c1x
+        add vx
+        dac c1x
+        lac c1y
+        add vy
+        dac c1y
+        lac c2x
+        add vx
+        dac c2x
+        lac c2y
+        add vy
+        dac c2y
+        lac c3x
+        add vx
+        dac c3x
+        lac c3y
+        add vy
+        dac c3y
+/
+        jmp loop
+
+        start go               / entry point (must be LAST line)

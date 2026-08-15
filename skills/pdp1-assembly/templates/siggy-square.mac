@@ -1,0 +1,83 @@
+/ square outline drawn with counted loops (Siggy exercise)
+/
+incr,   400
+nstp,   400
+one,    1
+/
+s,      100000
+ms,     677777
+/
+x,      0
+y,      0
+ctr,    0
+/
+go,     lac ms
+        dac x
+        lac s
+        dac y
+/
+top,    lac nstp
+        dac ctr
+tloop,  lac x
+        lio y
+        dpy
+        lac x
+        add incr
+        dac x
+        lac ctr
+        sub one
+        dac ctr
+        sza
+        jmp tloop
+/
+right,  lac s
+        dac x
+        lac nstp
+        dac ctr
+rloop,  lac x
+        lio y
+        dpy
+        lac y
+        sub incr
+        dac y
+        lac ctr
+        sub one
+        dac ctr
+        sza
+        jmp rloop
+/
+bottom, lac ms
+        dac y
+        lac nstp
+        dac ctr
+bloop,  lac x
+        lio y
+        dpy
+        lac x
+        sub incr
+        dac x
+        lac ctr
+        sub one
+        dac ctr
+        sza
+        jmp bloop
+/
+left,   lac ms
+        dac x
+        lac nstp
+        dac ctr
+lloop,  lac x
+        lio y
+        dpy
+        lac y
+        add incr
+        dac y
+        lac ctr
+        sub one
+        dac ctr
+        sza
+        jmp lloop
+/
+        jmp go
+
+        start go               / entry point (must be LAST line)

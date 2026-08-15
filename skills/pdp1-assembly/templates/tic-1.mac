@@ -1,0 +1,144 @@
+/ tic-tac-toe for PDP-1 Type 30 display
+/ Step 1: display the empty 3x3 game field
+/
+/ The Type 30 is a vector-scope display with no frame buffer.
+/ Each DPY instruction lights one point for a few milliseconds.
+/ To keep the grid visible, we draw all four lines repeatedly.
+/
+/ Board layout (raw coordinates, >>8 then +512 maps to 0-1023):
+/   left (-0o60000) to right (+0o60000),  416px to 608px on screen
+/   bot  (-0o60000) to top  (+0o60000),  416px to 608px on screen
+/   Lines at -0o20000, 0, +0o20000 in each axis
+/
+/ Each line is drawn by linear interpolation: 128 steps of 1/128th the span.
+/
+/ for macro1_1: start must be LAST line
+
+/ === Constants ===
+
+one,	1			/ used to decrement counters
+nstep,	200			/ 128 (octal 200) steps per line
+
+/ === Grid coordinates (raw 18-bit, before mapcoord) ===
+
+left,	717777			/ -0o60000  -> screen 416
+mid1,	757777			/ -0o20000  -> screen 480
+mid2,	20000			/ +0o20000  -> screen 544
+right,	60000			/ +0o60000  -> screen 608
+
+bot,	717777			/ -0o60000
+midy1,	757777			/ -0o20000
+midy2,	20000			/ +0o20000
+top,	60000			/ +0o60000
+
+/ === Line-drawing state (reused between calls) ===
+
+fx,	0			/ line start X
+fy,	0			/ line start Y
+tx,	0			/ line end X
+ty,	0			/ line end Y
+cx,	0			/ current X (advances during DDA)
+cy,	0			/ current Y
+ct,	0			/ step counter (counts down to zero)
+dx,	0			/ per-step X increment
+dy,	0			/ per-step Y increment
+
+gr4ret,	0			/ JSP return for grid4
+dwret,	0			/ JSP return for draw
+
+/ === Main entry point ===
+
+go,	jsp grid4		/ draw all four grid lines
+	jmp go			/ repeat forever
+
+/ === grid4 — draw all four grid lines ===
+
+grid4,	dac gr4ret		/ save return address
+
+/ Vertical 1: mid1, top to mid1, bot
+	lac mid1		/ AC = mid1 X
+	dac fx			/ line start X
+	lac top			/ AC = top Y
+	dac fy			/ line start Y
+	lac mid1		/ AC = mid1 X
+	dac tx			/ line end X
+	lac bot			/ AC = bot Y
+	dac ty			/ line end Y
+	jsp draw		/ draw this line
+
+/ Vertical 2: mid2, top to mid2, bot
+	lac mid2		/ AC = mid2 X
+	dac fx			/ line start X
+	lac top			/ AC = top Y
+	dac fy			/ line start Y
+	lac mid2		/ AC = mid2 X
+	dac tx			/ line end X
+	lac bot			/ AC = bot Y
+	dac ty			/ line end Y
+	jsp draw		/ draw this line
+
+/ Horizontal 1: left, midy1 to right, midy1
+	lac left		/ AC = left X
+	dac fx			/ line start X
+	lac midy1		/ AC = midy1 Y
+	dac fy			/ line start Y
+	lac right		/ AC = right X
+	dac tx			/ line end X
+	lac midy1		/ AC = midy1 Y
+	dac ty			/ line end Y
+	jsp draw		/ draw this line
+
+/ Horizontal 2: left, midy2 to right, midy2
+	lac left		/ AC = left X
+	dac fx			/ line start X
+	lac midy2		/ AC = midy2 Y
+	dac fy			/ line start Y
+	lac right		/ AC = right X
+	dac tx			/ line end X
+	lac midy2		/ AC = midy2 Y
+	dac ty			/ line end Y
+	jsp draw		/ draw this line
+
+	jmp i gr4ret		/ return to caller
+
+/ === draw — DDA line from (fx,fy) to (tx,ty) ===
+/ 128 steps. dx = (tx-fx)/128, dy = (ty-fy)/128 using 1's complement.
+
+draw,	dac dwret		/ save return address
+	lac fx			/ AC = start X
+	cma			/ complement: -fx
+	add tx			/ AC = tx - fx
+	sar 7s			/ AC = (tx-fx) / 128
+	dac dx			/ store X increment
+	lac fy			/ AC = start Y
+	cma			/ complement: -fy
+	add ty			/ AC = ty - fy
+	sar 7s			/ AC = (ty-fy) / 128
+	dac dy			/ store Y increment
+	lac fx			/ AC = start X
+	dac cx			/ initialise current X
+	lac fy			/ AC = start Y
+	dac cy			/ initialise current Y
+	lac nstep		/ AC = 128
+	dac ct			/ initialise step counter
+
+eloop,	lac ct			/ load counter
+	sza			/ skip next if zero
+	jmp elbody		/ not zero — draw another point
+	jmp i dwret		/ zero — done, return
+
+elbody,	lac cx			/ AC = current X
+	lio cy			/ IO = current Y
+	dpy			/ draw dot
+	lac cx			/ AC = current X
+	add dx			/ advance by X increment
+	dac cx			/ store new X
+	lac cy			/ AC = current Y
+	add dy			/ advance by Y increment
+	dac cy			/ store new Y
+	lac ct			/ AC = counter
+	sub one			/ decrement
+	dac ct			/ store
+	jmp eloop		/ next step
+
+	start go		/ entry point (must be LAST line for macro1_1)

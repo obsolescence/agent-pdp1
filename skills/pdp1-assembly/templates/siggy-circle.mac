@@ -1,0 +1,18 @@
+/ minimal point-plot exercise (Siggy exercise)
+/
+go,     lac x
+lup,    cma
+        sar 4s
+        add y
+        dac y
+        lio y
+        sar 4s
+        add x
+        dac x
+        dpy
+        jmp lup
+/
+x,      100000
+y,      0
+
+        start go               / entry point (must be LAST line)
