@@ -90,14 +90,26 @@ Start headless and deterministic for scripts and tests:
 ./pdp1 -t               # no coremem load/dump, POWER forced on
 ```
 
-For normal use run a panel driver first (vpanel for the virtual
-front panel, panel_pidp1 for hardware) — the standard install's
-start script is `bin/pdp1control.sh`. The Type 30 GUI (pdp1_periph)
-connects directly to 1040/3400; it needs no port flags.
+Normal use — the emulator is a service on your machine:
+
+```bash
+pdp1control start       # start it (launches the panel driver too:
+                        #   vpanel for the virtual panel,
+                        #   panel_pidp1 for hardware)
+pdp1control stat        # is it running?
+pdp1control stop        # stop it
+```
+
+The Type 30 GUI (pdp1_periph) connects directly to 1040/3400; it needs
+no port flags.
 
 Sanity check: `pdp1dbg.py 'hello'` → `+ proto=1 machine=pdp1 …`.
 (Humans may use `echo hello | ncat -w 1 localhost 1040` — hello is
 instant-reply.)
+
+Nothing answering? The helper's connection error says "is the emulator
+running?" — check `pdp1control stat`; if it is not running,
+`pdp1control start`, then try again.
 
 ## Loading a program
 

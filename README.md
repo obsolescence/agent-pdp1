@@ -4,20 +4,19 @@ AI copilot skills and tools for the PiDP-1. This package turns an AI
 agent (Hermes Agent, Claude Code, or any agent that reads markdown
 skills) into a helpful copilot for your PDP-1: writing and assembling
 programs, debugging a running machine over the debug port, operating
-the emulator, and reading the Type 30 display.
+the emulator, and reading the Type 30 display. Or just become your tutor.
 
-Works on a Raspberry Pi or a regular Linux machine running the
-blincolnlights PDP-1 emulator (dbg branch). The dbg update lets the
-simulator handle the user and an AI agent concurrently.
+Works on a PiDP-1 (needs 4, perhaps 2 GB of RAM) or a regular Linux machine 
+with the pidp1 package already installed. 
 
 ## Install
 
     git clone https://github.com/obsolescence/agent-pdp1.git /opt/agent-pdp1
     cd /opt/agent-pdp1
-    ./install.sh        # updates the emulator to the dbg branch, installs
-                        # the agent tools, runs a smoke test
-    ./setup-hermes.sh   # wires the skills into Hermes Agent (API key and
-                        # install guidance included)
+    ./install.sh        # updates the emulator, installs agent tools
+    ./setup-hermes.sh   # explains/helps with installing Hermes Agent,
+                        #   then wires the skills into Hermes Agent 
+                        #   (API key and install guidance included)
 
 Both scripts explain each step as they run; every step can be declined.
 
@@ -41,6 +40,3 @@ file, copied per install, never shared).
 
     ./skills/update.sh    # unprotect, git pull, re-protect
 
-## License
-
-MIT

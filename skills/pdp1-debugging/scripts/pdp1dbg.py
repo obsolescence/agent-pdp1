@@ -277,7 +277,7 @@ def run_cli(argv=None):
         dbg = Dbg(a.host, a.port, a.timeout, lst)
     except OSError as e:
         sys.exit("connect %s:%d: %s\n"
-                 "  is the emulator running?  ps aux | grep pdp1" %
+                 "  is the emulator running?  pdp1control stat  (or: ps aux | grep pdp1)" %
                  (a.host, a.port, e))
 
     cmds = []

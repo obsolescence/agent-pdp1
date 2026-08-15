@@ -119,7 +119,7 @@ The Type 10 EAE provides hardware `mul` and `div` instructions. These must
 be enabled at runtime on the blincolnlights emulator:
 
 ```
-echo 'muldiv on' | ncat -w 1 localhost 1040
+pdp1dbg.py 'muldiv on'
 ```
 
 **Important:** `muldiv` with no argument **toggles** the state. On every
