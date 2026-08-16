@@ -169,6 +169,11 @@ test/fixtures/*.snp       golden captures (tictactoe, cube, scatter, empty, demo
   Grids flip y so row 0 = top, like the real scope.
 - The flipbook slices by WORD COUNT, not wall-clock — fine while the
   display list repeats continuously, which it always does when running.
+  Reading the slices: frames each carrying ~the full point count are
+  whole pictures at different times (motion evidence); frames with
+  fractions summing to the total are chunks of ONE pass (drawing
+  sequence — no motion claim). For definitive motion, use two
+  time-separated `-r` captures and `--against`.
 - Pattern glyphs are inferences from statistics, not ground truth: a
   sparse crossing can look diagonal. When the answer matters, verify with
   `--point`/`--region` or `--expect`.

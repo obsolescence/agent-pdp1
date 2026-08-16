@@ -212,9 +212,11 @@ See §7 for when — and how — to use this tier.
 default 100; replies immediately — sleep `ms`, then read the machine's
 reaction).
 
-Network filenames are confined to the tape directory: relative, no
-`..`. Device verbs are the only lenient verbs; everywhere else,
-unknown trailing arguments are `?arg`, never ignored.
+Network filenames are confined to the tape directory: relative
+paths only, no `..` components. Unquoted names with SPACES
+truncate at the first space — quote the name (`r "my tape.rim"`)
+to address it. Device verbs are the only lenient verbs; everywhere
+else, unknown trailing arguments are `?arg`, never ignored.
 
 ## 5. Machine semantics — what the status means
 
@@ -232,11 +234,19 @@ positionally):
 - `cyc=1` means the machine halted MID-CYCLE — registers are a
   partial snapshot (MB may hold the fetched word, AC the old value).
   `go` resumes the interrupted instruction; `w pc` clears the
-  mid-cycle state.
+  mid-cycle state. (The same state appears harmlessly after `l` or
+  READ-IN while running — don't panic; stop first or `w pc`.)
 - **Sense switches and program flags are numbered from the LEFT**:
   switch N is bit `0o40>>(N-1)` — switch 1 is `040`, switch 6 is
   `001`. `ss=40` = switch 1 up, which is what `szs 1` (`640010`)
   tests.
+- TW is the 18-bit Test Word bank: TW1 = bit 0 (rightmost),
+  TW18 = bit 17; `sw tw` sets the whole word. (SS is the 6-bit
+  bank; a `reg` field of width 6 is OCTAL digits, not bits.)
+- Panel banks: SS and TW run user→program (SS tested by `szs`,
+  TW read into the AC); the six PF flags run program→user
+  (`spf`/`cpf`, shown by the panel lamps). `audio on` renders
+  PF1-4 as sound.
 - Registers writable with `w`: `pc ac io ma mb ir ov pf epc ema`.
   Read-only: `ta tw ss eta` (switches — use `sw`) and the status bits
   `run run_enable cyc df1 df2 bc hsc rim sbm exd ioh ioc ios`.
@@ -275,6 +285,10 @@ machine" will examine the wrong word for the two most common reasons.
 A fresh machine stopping on `illegal` before executing anything is
 the random-power-on signature (leftover `cyc`/`bc`/`sbm`): the
 reaction is `w pc` + `go`.
+
+`s` during or right after a READ-IN can show `stop=illegal` with
+odd pc/ov — the read-in sequence, not a crash; let the load
+settle (run=1 executing) before judging status.
 
 ## 7. The front panel via 1040
 

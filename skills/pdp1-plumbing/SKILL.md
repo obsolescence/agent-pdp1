@@ -8,14 +8,15 @@ description: operating the PiDP-1 — unserstanding the setup: connections, type
 Your role is to be assistant to and programmer for the user of this 
 PDP-1 replica, called a PiDP-1. 
 
-3 ports connect you to the PDP-1. Only port 1041 should be used directly. 
-Important: The other two must be used through the specified helper programs
-(pdp1_dpy and pdp1dbg.py tools). 
+4 ports connect you to the PDP-1. Only port 1041 should be used directly.
+Important: the other three must be used through the specified helper programs
+(pdp1_dpy, pdp1dbg.py and pdp1ctl tools).
 
 | Port | Surface | Who uses it |
 | ---- | ------- | ----------- |
 | 1040 | debug interface (line protocol) | agent drives the machine here, including control over front panel |
 | 1041 | typewriter telnet (fan-out) | agent AND the user share the same typewriter |
+| 1050 | paper-tape control (pdp1_periph) | pdp1ctl + GUI tools; the human-visible mount path |
 | 3400 | Type 30 display stream (fan-out) | agent and pdp1_periph can watch concurrently |
 
 Connection limits: 1040 up to 8, typewriter 4, display 4, reader/punch 1.
@@ -121,9 +122,30 @@ to where the emulator can see it (network filenames are confined to
 the tape directory, relative paths only).
 
 ```bash
-pdp1dbg.py 'l program.rim'    # load into core, no start
+pdp1dbg.py 'l program.rim'    # quick load into core, no start
 pdp1dbg.py 'r program.rim'    # mount in reader (for READ-IN)
 ```
+
+**Three load routes — pick by who is watching:**
+
+| route | command | periph | panel | speed |
+| ----- | ------- | ------ | ----- | ----- |
+| core load | `l <file>` (1040) | — | — | instant |
+| reader mount | `r <file>` (1040) | — | reader | instant |
+| human mount | `pdp1ctl r <path>` (1050) | shows | shows | realistic |
+
+`l` is the fastest for pure-RIM tapes (`macro1_1 -r`) but loads
+core only — no start, no panel, no periph; set the entry
+(`w pc <entry>` + `go`). `r` (1040) mounts in the reader, any
+format, needs a READ-IN push (`key readin`). 1050 is the human's
+lane: real mount at real speed, visible everywhere, the human
+presses READ-IN — use it when the USER asked for the load.
+
+**`l` lies on block tapes:** it parses RIM only — on a block tape
+it loads the RIM bootstrap as data and reports success with the
+program absent. macro1_1's default output is a block tape; only
+`-r` emits pure RIM. When in doubt, verify with
+`pdp1dbg.py --lst prog.lst 'check'` — "0 of N words differ".
 
   The tape directory is the emulator's working directory unless it was
   started with -D <tapedir>. pdp1control passes no -D, so on the
@@ -133,6 +155,15 @@ pdp1dbg.py 'r program.rim'    # mount in reader (for READ-IN)
 Entry point from the listing: `grep 'go,' program.lst` — the address
 field. Then over 1040: `pdp1dbg.py 'w pc <entry>' 'go'` (or
 `go <entry>`).
+
+The verified quick-load sequence (agent's own output):
+
+    macro1_1 -r line.mac              # pure RIM (see block-tape warning)
+    cp line.rim /opt/pidp1/tapes/
+    # stop the machine first
+    pdp1dbg.py 'l tapes/line.rim'
+    pdp1dbg.py --lst line.lst 'check'     # "0 of N words differ" = landed
+    pdp1dbg.py 'w pc 4' 'go'          # entry from the listing
 
 ## Where things live
 
