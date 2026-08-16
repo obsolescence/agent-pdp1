@@ -6,10 +6,11 @@
 # points you at the skills.
 #
 # Steps:
-#   1. emulator update + rebuild      (no sudo)
-#   2. agent tools -> /usr/local/bin  (sudo)
-#   3. smoke test: hello over 1040
-#   4. where the skills live
+#   1. take ownership of this directory  (sudo; undo the sudo git clone)
+#   2. emulator update + rebuild         (no sudo)
+#   3. agent tools -> /usr/local/bin     (sudo)
+#   4. smoke test: hello over 1040
+#   5. where the skills live
 
 set -u
 
@@ -22,6 +23,26 @@ say()  { echo "== $*"; }
 fail() { echo "ERROR: $*" >&2; exit 1; }
 cleanup() { [ -n "$EMU_PID" ] && kill "$EMU_PID" 2>/dev/null; }
 trap cleanup EXIT
+
+# --------------------------------------------------------------- ownership
+
+say "taking ownership of $SELF_DIR"
+if [ "$(stat -c '%U' "$SELF_DIR" 2>/dev/null)" = "$(id -un)" ]; then
+    echo "  already owned by you ($(id -un)) — nothing to do"
+else
+    echo "  after a 'sudo git clone' the package is owned by root; you need"
+    echo "  ownership to update it (skills/update.sh) and edit files."
+    read -r -p "  Take ownership now (needs sudo)? [Y/n] " ans
+    case "${ans:-y}" in
+        ""|[Yy]*)
+            sudo chown -R "$(id -un):$(id -gn)" "$SELF_DIR" || fail "sudo failed — see above"
+            echo "  ok — $SELF_DIR now belongs to $(id -un)"
+            ;;
+        *)
+            echo "  Skipped. You can do it later:  sudo chown -R $(id -un):$(id -gn) $SELF_DIR"
+            ;;
+    esac
+fi
 
 # ---------------------------------------------------------------- pre-flight
 
