@@ -9,7 +9,10 @@ looked up in the listing by eye).
 
     pdp1dbg.py --lst tic.lst 'w pc go' 'b chkwin' 'run 100000' 's'
     pdp1dbg.py --lst tic.lst trace 20
-    pdp1dbg.py -                        # commands on stdin, one per line
+    pdp1dbg.py -                        # commands on stdin, one per line;
+                                        # a blank line flushes the batch so
+                                        # far; 'sleep N' / 'usleep N' pause
+                                        # locally between commands
 
 Labels are substituted into commands and annotated in replies, both ways.
 Exit status is 1 if any command answered '-'.
@@ -21,6 +24,7 @@ import argparse
 import re
 import socket
 import sys
+import time
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 1040
@@ -258,6 +262,7 @@ LOCAL = {"where": cmd_where, "check": cmd_check}
 
 
 def run_cli(argv=None):
+    sys.stdout.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser(
         description="drive the PDP-1 debug service on port 1040")
     ap.add_argument("--host", default=DEFAULT_HOST)
@@ -269,7 +274,8 @@ def run_cli(argv=None):
                     help="no label substitution or annotation")
     ap.add_argument("cmd", nargs="*",
                     help="protocol commands, plus the listing-only 'where "
-                         "[n]' and 'check'; '-' reads them from stdin")
+                         "[n]' and 'check'; '-' reads them from stdin "
+                         "(blank line flushes, 'sleep N'/'usleep N' pause)")
     a = ap.parse_args(argv)
 
     lst = Listing(a.lst) if a.lst else Listing()
@@ -280,41 +286,70 @@ def run_cli(argv=None):
                  "  is the emulator running?  pdp1control stat  (or: ps aux | grep pdp1)" %
                  (a.host, a.port, e))
 
-    cmds = []
-    for c in a.cmd:
-        if c == "-":
-            cmds.extend(l.strip() for l in sys.stdin if l.strip())
-        else:
-            cmds.append(c)
-    if not cmds:
-        cmds = ["s"]
+    def run_batch(cmds):
+        failed = False
+        for cmd in cmds:
+            head = cmd.split()[0].lower() if cmd.split() else ""
+            if head in ("sleep", "usleep"):
+                parts = cmd.split()
+                try:
+                    if head == "usleep":
+                        delay = int(parts[1]) / 1e6
+                    else:
+                        delay = float(parts[1]) if len(parts) > 1 else 1.0
+                    if delay < 0:
+                        raise ValueError
+                except (IndexError, ValueError):
+                    print("  ERROR %s: bad delay" % cmd)
+                    failed = True
+                    continue
+                print("> " + cmd)
+                time.sleep(delay)
+                continue
+            if head in LOCAL and not a.raw:
+                print("> " + cmd)
+                if not LOCAL[head](dbg, cmd.split()[1] if len(cmd.split()) > 1
+                                   else None):
+                    failed = True
+                continue
+            line = cmd if a.raw else dbg.expand(cmd)
+            okc, data, final = dbg.send(line)
+            print("> " + line)
+            istrace = line.split()[:1] == ["trace"]
+            for d in data:
+                out = d if a.raw else dbg.annotate(d)
+                if istrace and not a.raw:
+                    m = re.match(r"pc=([0-7]{6})", d)
+                    src = dbg.source_at(int(m.group(1), 8)) if m else None
+                    if src:
+                        out += "    " + src
+                print("  " + out)
+            if okc:
+                print("  " + (final if a.raw else dbg.annotate(final)))
+            else:
+                print("  ERROR " + final)
+                failed = True
+        return failed
 
     failed = False
-    for cmd in cmds:
-        head = cmd.split()[0].lower() if cmd.split() else ""
-        if head in LOCAL and not a.raw:
-            print("> " + cmd)
-            if not LOCAL[head](dbg, cmd.split()[1] if len(cmd.split()) > 1
-                               else None):
-                failed = True
-            continue
-        line = cmd if a.raw else dbg.expand(cmd)
-        okc, data, final = dbg.send(line)
-        print("> " + line)
-        istrace = line.split()[:1] == ["trace"]
-        for d in data:
-            out = d if a.raw else dbg.annotate(d)
-            if istrace and not a.raw:
-                m = re.match(r"pc=([0-7]{6})", d)
-                src = dbg.source_at(int(m.group(1), 8)) if m else None
-                if src:
-                    out += "    " + src
-            print("  " + out)
-        if okc:
-            print("  " + (final if a.raw else dbg.annotate(final)))
+    pending = []
+    saw = False
+    for c in a.cmd:
+        if c == "-":
+            for line in sys.stdin:
+                s = line.strip()
+                if not s:
+                    failed |= run_batch(pending)
+                    del pending[:]
+                    continue
+                pending.append(s)
+                saw = True
         else:
-            print("  ERROR " + final)
-            failed = True
+            pending.append(c)
+            saw = True
+    failed |= run_batch(pending)
+    if not saw:
+        failed |= run_batch(["s"])
     for e in dbg.events:
         print("  ! " + (e if a.raw else dbg.annotate(e)))
     dbg.close()

@@ -75,7 +75,8 @@ the framing per session:
 
     pdp1dbg.py 's'                            # one command
     pdp1dbg.py 'w pc 4' 'step 3' 'reg'        # several, same connection
-    pdp1dbg.py -                              # commands on stdin, one per line
+    pdp1dbg.py -                              # commands on stdin; blank line = flush;
+                                              #   'sleep N'/'usleep N' pause locally
     pdp1dbg.py --lst program.lst 'b loop' 'run 1000'   # label substitution
 
 - Each invocation is one connection; commands run serialized in
@@ -83,7 +84,15 @@ the framing per session:
   answered `-` — and the `?token` is printed verbatim.
 - **Stdin batch mode (`-`) keeps ONE connection open** — the only way
   to hold connection-scoped state (the panel override, a `claim`).
-  Use it for every `panel`/`sw`/`key` sequence.
+  Use it for every `panel`/`sw`/`key` sequence. It buffers stdin to
+  EOF before sending anything — EXCEPT a blank line, which flushes
+  the batch so far (pace from the shell: flush, then sleep, then
+  write more).
+- `sleep N` / `usleep N` are LOCAL commands: they pause the client
+  between commands and never reach the emulator. That is how a timed
+  sequence (TW pulse, §9) is expressed INSIDE the batch. A shell
+  `sleep` inside a piped stdin does NOT pace the script — see the
+  recipe for the reliable form.
 - `--lst` substitutes labels into commands and annotates replies.
   Optional sugar — everything below works in pure octal.
 - Bonus listing-only commands: `where [n]` (source context around
@@ -333,6 +342,22 @@ loud before doing it).
     reg                       # PC points AT the label
     e 0o15 1                  # inspect a variable
 
+### Timed switch pulse (hold TW/SS for N seconds)
+
+    pdp1dbg.py - <<'EOF'
+    panel on
+    sw tw 400
+    sleep 4
+    sw tw 0
+    panel off
+    EOF
+
+The in-stream `sleep` runs client-side while the connection stays
+open, so the emulator holds TW400 for the full 4 s. This is the
+reliable way to time a pulse: a shell `sleep` inside a PIPED stdin
+(`echo … | pdp1dbg.py -`) sleeps on the shell side, and the script
+sends everything back-to-back once the pipe closes.
+
 ### Why did it halt
 
     s                         # read stop= and at=
@@ -467,4 +492,7 @@ M[15]!=1`), clean up (`ub *`).
   leaves SINST set and makes every run stop with `stop=manual` —
   remove the file before a clean test run (file hygiene, not an
   interface).
+- 2026-08-16: stdin batch timing — blank-line flush plus `sleep`/
+  `usleep` locals (verified against the dbg emulator; timed-pulse
+  recipe in §9).
 - This skill: v1.0 after the live validation.
