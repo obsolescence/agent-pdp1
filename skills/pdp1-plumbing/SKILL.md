@@ -125,6 +125,11 @@ pdp1dbg.py 'l program.rim'    # load into core, no start
 pdp1dbg.py 'r program.rim'    # mount in reader (for READ-IN)
 ```
 
+  The tape directory is the emulator's working directory unless it was
+  started with -D <tapedir>. pdp1control passes no -D, so on the
+  default install tapes under /opt/pidp1/tapes mount as
+  tapes/<name>.rim — not as <name>.rim.
+
 Entry point from the listing: `grep 'go,' program.lst` — the address
 field. Then over 1040: `pdp1dbg.py 'w pc <entry>' 'go'` (or
 `go <entry>`).
