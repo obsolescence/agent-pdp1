@@ -71,15 +71,16 @@ fi
 
 say "step 3: the PDP-1 skills"
 mapfile -t PROFILES < <(find "$HOME/.hermes/profiles" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+HERMES_HOME="$HOME/.hermes"
 case "${#PROFILES[@]}" in
     0)
-        echo "  No Hermes profile yet. Run 'hermes setup' once (it asks for"
-        echo "  your API key and creates your profile), then re-run this script:"
-        echo "    ./setup-hermes.sh"
-        exit 1
+        echo "  No Hermes profile found — installing into the default setup"
+        echo "  (~/.hermes). PDP-1 work doesn't need a profile; if you create"
+        echo "  one later, re-run this script to install into it."
         ;;
     1)
         PROFILE="$(basename "${PROFILES[0]}")"
+        HERMES_HOME="$HOME/.hermes/profiles/$PROFILE"
         echo "  Using your profile: $PROFILE"
         ;;
     *)
@@ -92,12 +93,15 @@ case "${#PROFILES[@]}" in
             *[!0-9]*|"") fail "pick a number" ;;
             *) [ "$ans" -ge 1 ] && [ "$ans" -le "${#PROFILES[@]}" ] \
                    || fail "pick a number between 1 and ${#PROFILES[@]}"
-               PROFILE="$(basename "${PROFILES[$((ans-1))]}")" ;;
+               PROFILE="$(basename "${PROFILES[$((ans-1))]}")"
+               HERMES_HOME="$HOME/.hermes/profiles/$PROFILE" ;;
         esac
         ;;
 esac
 
-SKILLS_DIR="$HOME/.hermes/profiles/$PROFILE/skills"
+PROFILE_LABEL="${PROFILE:-default setup}"
+
+SKILLS_DIR="$HERMES_HOME/skills"
 mkdir -p "$SKILLS_DIR"
 
 echo "  symlinking the frozen skills — a symlink is a pointer, so updates"
@@ -133,7 +137,7 @@ fi
 
 echo "  copying SOUL.md — the rules file. Your agent reads it with every"
 echo "  request; it keeps the agent disciplined about the machine"
-SOUL_FILE="$HOME/.hermes/profiles/$PROFILE/SOUL.md"
+SOUL_FILE="$HERMES_HOME/SOUL.md"
 if [ -e "$SOUL_FILE" ]; then
     echo "  You already have one here: $SOUL_FILE"
     read -r -p "  Overwrite it with the package version? [y/N] " ans
@@ -159,10 +163,10 @@ echo "  agent. The work is careful machine-level stuff — octal"
 echo "  arithmetic, protocol framing, stop-reason diagnosis — and 'max'"
 echo "  gives the agent the depth to get the details right. On DeepSeek"
 echo "  the extra cost stays small."
-read -r -p "  Set reasoning to max for profile '$PROFILE'? [Y/n] " ans
+read -r -p "  Set reasoning to max for '$PROFILE_LABEL'? [Y/n] " ans
 case "${ans:-y}" in
     [Yy]*)
-        CONFIG_FILE="$HOME/.hermes/profiles/$PROFILE/config.yaml"
+        CONFIG_FILE="$HERMES_HOME/config.yaml"
         [ -f "$CONFIG_FILE" ] || fail "no config.yaml at $CONFIG_FILE"
         cp "$CONFIG_FILE" "$CONFIG_FILE.agent-pdp1.bak"
         python3 - "$CONFIG_FILE" <<'PY'
@@ -189,7 +193,7 @@ esac
 # ------------------------------------------------------------------ verify
 
 say "verify"
-echo "  installed for profile '$PROFILE':"
+echo "  installed for '$PROFILE_LABEL':"
 ls "$SKILLS_DIR" | grep 'pdp1' | sed 's/^/    /'
 for s in pdp1-assembly pdp1-code-review pdp1-debugging \
          pdp1-plumbing pdp1-tutor pdp1-type30-vision; do
