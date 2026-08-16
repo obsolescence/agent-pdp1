@@ -8,6 +8,7 @@
 #   1. your LLM API key   (you do this — the script explains how)
 #   2. install Hermes     (one command — or the script runs it for you)
 #   3. the PDP-1 skills   (the script does this)
+#   4. reasoning level    (recommended: max — you decide)
 
 set -u
 
@@ -149,6 +150,41 @@ if [ -e "$SOUL_FILE" ]; then
 else
     cp "$PKG_DIR/hermes-specific/SOUL.md" "$SOUL_FILE"
 fi
+
+# --------------------------------------------------- step 4: reasoning level
+
+say "step 4: reasoning level"
+echo "  For PDP-1 work we strongly recommend 'max' reasoning for your"
+echo "  agent. The work is careful machine-level stuff — octal"
+echo "  arithmetic, protocol framing, stop-reason diagnosis — and 'max'"
+echo "  gives the agent the depth to get the details right. On DeepSeek"
+echo "  the extra cost stays small."
+read -r -p "  Set reasoning to max for profile '$PROFILE'? [Y/n] " ans
+case "${ans:-y}" in
+    [Yy]*)
+        CONFIG_FILE="$HOME/.hermes/profiles/$PROFILE/config.yaml"
+        [ -f "$CONFIG_FILE" ] || fail "no config.yaml at $CONFIG_FILE"
+        cp "$CONFIG_FILE" "$CONFIG_FILE.agent-pdp1.bak"
+        python3 - "$CONFIG_FILE" <<'PY'
+import re, sys
+p = sys.argv[1]
+text = open(p).read()
+if "reasoning_effort" in text:
+    text = re.sub(r"(?m)^(\s*reasoning_effort:\s*).*$", r"\1max", text)
+elif re.search(r"(?m)^agent:\s*$", text):
+    text = re.sub(r"(?m)^(agent:\s*)$", r"\1\n  reasoning_effort: max", text)
+else:
+    text = text.rstrip("\n") + "\nagent:\n  reasoning_effort: max\n"
+open(p, "w").write(text)
+PY
+        grep -q 'reasoning_effort: max' "$CONFIG_FILE" \
+            && echo "  ok — reasoning_effort: max set (backup: $CONFIG_FILE.agent-pdp1.bak)" \
+            || fail "could not set reasoning_effort in $CONFIG_FILE"
+        ;;
+    *)
+        echo "  Fine — set it later yourself:  hermes config set agent.reasoning_effort max"
+        ;;
+esac
 
 # ------------------------------------------------------------------ verify
 
