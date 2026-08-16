@@ -9,14 +9,14 @@ Your role is to be assistant to and programmer for the user of this
 PDP-1 replica, called a PiDP-1. 
 
 4 ports connect you to the PDP-1. Only port 1041 should be used directly.
-Important: the other three must be used through the specified helper programs
-(pdp1_dpy, pdp1dbg.py and pdp1ctl tools).
+1040 and 3400 go through their helpers (pdp1dbg.py, pdp1_dpy); 1050
+is a one-line control port — see Loading a program.
 
 | Port | Surface | Who uses it |
 | ---- | ------- | ----------- |
 | 1040 | debug interface (line protocol) | agent drives the machine here, including control over front panel |
 | 1041 | typewriter telnet (fan-out) | agent AND the user share the same typewriter |
-| 1050 | paper-tape control (pdp1_periph) | pdp1ctl + GUI tools; the human-visible mount path |
+| 1050 | paper-tape control (pdp1_periph) | direct ncat one-liner; the human-visible mount path |
 | 3400 | Type 30 display stream (fan-out) | agent and pdp1_periph can watch concurrently |
 
 Connection limits: 1040 up to 8, typewriter 4, display 4, reader/punch 1.
@@ -132,14 +132,17 @@ pdp1dbg.py 'r program.rim'    # mount in reader (for READ-IN)
 | ----- | ------- | ------ | ----- | ----- |
 | core load | `l <file>` (1040) | — | — | instant |
 | reader mount | `r <file>` (1040) | — | reader | instant |
-| human mount | `pdp1ctl r <path>` (1050) | shows | shows | realistic |
+| human mount | `r <path>` via 1050 | shows | shows | realistic |
 
 `l` is the fastest for pure-RIM tapes (`macro1_1 -r`) but loads
 core only — no start, no panel, no periph; set the entry
 (`w pc <entry>` + `go`). `r` (1040) mounts in the reader, any
 format, needs a READ-IN push (`key readin`). 1050 is the human's
 lane: real mount at real speed, visible everywhere, the human
-presses READ-IN — use it when the USER asked for the load.
+presses READ-IN — use it when the USER asked for the load. The
+one-liner: `printf 'r %s\n' <path> | ncat -w 1 localhost 1050` —
+absolute paths are fine: pdp1_periph opens the file itself and
+feeds the emulator's reader device.
 
 **`l` lies on block tapes:** it parses RIM only — on a block tape
 it loads the RIM bootstrap as data and reports success with the
