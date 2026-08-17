@@ -137,7 +137,9 @@ pdp1dbg.py 'r program.rim'    # mount in reader (for READ-IN)
 `l` is the fastest for pure-RIM tapes (`macro1_1 -r`) but loads
 core only — no start, no panel, no periph; set the entry
 (`w pc <entry>` + `go`). `r` (1040) mounts in the reader, any
-format, needs a READ-IN push (`key readin`). 1050 is the human's
+format, needs a READ-IN push (`key readin`). A failed mount leaves
+the reader unmounted — it is closed before the path is checked.
+**[src]** 1050 is the human's
 lane: real mount at real speed, visible everywhere, the human
 presses READ-IN — use it when the USER asked for the load. The
 one-liner: `printf 'r %s\n' <path> | ncat -w 1 localhost 1050` —

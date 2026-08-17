@@ -312,6 +312,11 @@ The override model:
   `panel on` in one invocation and `sw` in the next silently disarms
   between them — always compose the whole sequence into ONE batch:
   `pdp1dbg.py -` with `panel on`, all `sw`/`key`, then `panel off`.
+- **`panel off` reverts to the real panel.** Switch values set with `sw`
+  hold only while the override is armed; after `panel off` the program
+  sees the physical switches again. The program must sample inside the
+  `panel on`…`panel off` window. **[verified 2026-08-17: `sw ss 7` →
+  ss=07 while armed; ss=00 after `panel off`]**
 - **It is visible and escapable.** While the override holds TW or SS,
   the panel lights every sense switch lamp. The physical panel's tape
   reader key releases the override — the human always wins. If you

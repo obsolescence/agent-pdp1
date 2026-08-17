@@ -12,6 +12,28 @@ worked error example uses `TAD I DUMMY`, an instruction the PDP-1 does not have.
 Do not trust the prose in `MACRO1_PROGRAMMING_GUIDE.md`; trust the symbol table
 in the source.
 
+### Canonical program layout
+
+One picture of a valid macro1_1 source:
+
+    / comment                  first line is the tape title — never assembled
+go,     law 0
+        add one                named data words, never `(` literals
+        dac s5
+        hlt
+        consta                 pool punched here — after the references
+s5,     0
+s1,     0
+        start go               LAST — punches the JMP transfer word, the
+                               entry point; anything after it never
+                               reaches core
+
+Three rules, mechanisms documented below:
+- First line = title. Start the file with a `/` comment.
+- `consta` must follow the references it pools.
+- `start` goes last: it punches the entry transfer word, and the line
+  after a processed `start` is eaten as a new title.
+
 ### Invocation
 
 ```bash
@@ -122,6 +144,15 @@ characters and the whole class of problem disappears.
   assembled word lands at `00004` unless a `nnnn/` location set says otherwise.
 - **Never use `expunge`.** It clears the entire symbol table including the
   built-in opcodes, so every instruction after it fails in pass 2.
+- **Numbers are octal.** `law i 20` loads −16 decimal; a loop counter
+  written `20` silently runs 16 times. `decimal`/`octal` switch the radix.
+  **[verified 2026-08-16]**
+- **Never name a label `i`.** `i` is the permanent indirect modifier
+  (value 0010000); a user label with that name silently shadows it —
+  `lac i ptr` then assembles as a DIRECT reference to `(i+ptr)` with no
+  error, and `law i 20` becomes `law (i+20)`. **[verified 2026-08-17:
+  label `i` at 00004 → `lac i 20` = 200024 (direct), `law i 20` =
+  700024; without the label both are correct]**
 
 ### Macros
 
@@ -149,23 +180,19 @@ unrolling and for bit-doubling constants (`repeat 6, B=B+B`).
 `constants` and `variables` mark the literal and variable blocks. `clear a, b`
 zeroes an address range at load time, far cheaper than a clear loop.
 
-### Literals: the `(` syntax
+### Literals: the `(` syntax — do not use
 
-`add (377777` places the value in a literal pool and assembles an `add`
-referencing the pool entry. For a *label*, `add (dwtab` places the label's
-address in the pool.
+`add (5` is a literal: the assembler pools the value and references the
+pool slot. The pool is only punched when an explicit `consta` pseudo-op
+follows the references; the "implied constants" path in the source is dead
+code (runs before pass 2, count still 0). Without `consta`, `add (5`
+assembles to `add 000000` and every literal reads 0 after `l` — silent
+wrong math, same in `-r` and block modes. **[verified 2026-08-17:
+no-`consta` → s5=0/s1=0 in both modes; with `consta` → s5=5/s1=6]**
 
-Inherited notes report that `add (label` sometimes assembled to `add 000001`,
-silently adding the contents of address 1. **[observed]** — the mechanism was
-never established, and a plausible explanation is that the label was undefined
-at that point for an unrelated reason (six-character truncation being the usual
-suspect) and the pool entry resolved against a zero value.
-
-If you hit it, the diagnosis is to read the assembled word in the `.lst`. The
-workarounds — `law label`, or a data word `ptr, label` plus `add ptr` — both
-work and cost nothing, so there is no need to resolve the mystery to get on with
-the program. But do not treat "the literal pool is unreliable" as established
-behaviour; it is one unexplained observation.
+Do not write literals; use named data words (`one, 1` ... `add one`), the
+style the guides recommend. When reading old code, `(x)` is a pooled
+constant, not indirection — the pointer form is `lac i ptr`.
 
 ## monas
 

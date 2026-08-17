@@ -121,7 +121,9 @@ define swap rcl 9s rcl 9s term
 ```
 
 `scr`/`scl` shift the combined pair; `rcr`/`rcl` rotate it. Any of the combined
-forms will change IO — that is what they are for, not corruption.
+forms will change IO — that is what they are for, not corruption. A combined
+right shift leaves a small (≤18-bit) result in IO, not AC — swap (`rcl 9s`
+twice) before `dac`.
 
 ## The Extended Arithmetic Element: `mul` and `div`
 
